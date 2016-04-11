@@ -195,8 +195,9 @@ var log = require('tracer').console({
       {
       // Limpiar la fecha
       var fecha = moment(timestamp,'YYYY-MM-DDTHH:mm:ss.SSSZ');
-      var pos_date = fecha.format("YYYYMMDDHHmmss");
       var epoch = moment(fecha);
+      var fecha_nomo = fecha.format("YYYYMMDDHHmmss");
+
       //log.info("----------->"+epoch);
 
       // Leer el imei
@@ -236,6 +237,8 @@ var log = require('tracer').console({
                 //var trama = imei + "," + pos_date + "," + data[0].longitude + "," + data[0].latitude + ",0,0,0,9,2,0.0,0.9,3836," + data[0].description;
                 // TRAMA: %imei,typeObt,latitude,longitude,date,altitude,speed
                 var trama = "%" + imei + "," + properties.get('kyros.device.personnelSwipe') + "," + data[0].latitude + "," + data[0].longitude + "," + epoch + ",0,0";
+                //trama wonde. 
+                var trama_nomo = imei + "," + fecha_nomo + "," + data[0].longitude + "," + data[0].latitude + ",0," + "0" + ",0,9,2,0.0,0.9,3836";
 
                 //log.debug ('Trama a enviar a KCS: %s', trama);
                 log.debug ("Trama a enviar a KCS (" + properties.get('kyros.kcs.aisip') + ":" + properties.get('kyros.kcs.aisport') + "): " + trama);
@@ -320,149 +323,140 @@ var log = require('tracer').console({
 
 router.post('/PersonnelSwipe/', function(req, res)
 {
-    // Enviar trama wonde
-    //1013973778,20120519161619,-3.784988,43.398126,96,246,14,9,2,0.0,0.9,3836
-    //101,20150612120119,-3.784988,43.398126,96,246,14,9,2,0.0,0.9,3836
-    //Device ID,DateTime,Longitude,Latitude,Speed,Heading,Altitude,Satellite,Event ID,Mileage,Hdop,Battery mA
+  log.info ("/PersonnelSwipe");
 
+  var timestamp = req.params.timestamp || req.query.timestamp || req.body.timestamp;
+  var vehicleLicense = req.params.cardIdentifier || req.query.cardIdentifier || req.body.cardIdentifier;
+  var swipeName = req.params.cardReaderIdentifier || req.query.cardReaderIdentifier || req.body.cardReaderIdentifier;
 
-      log.info ("/PersonnelSwipe");
+  log.debug("  -> timestamp:            " + timestamp);
+  log.debug("  -> cardIdentifier:       " + vehicleLicense);
+  log.debug("  -> cardReaderIdentifier: " + swipeName);
 
-      var timestamp = req.params.timestamp || req.query.timestamp || req.body.timestamp;
-      var vehicleLicense = req.params.cardIdentifier || req.query.cardIdentifier || req.body.cardIdentifier;
-      var swipeName = req.params.cardReaderIdentifier || req.query.cardReaderIdentifier || req.body.cardReaderIdentifier;
-
-      log.debug("  -> timestamp:            " + timestamp);
-      log.debug("  -> cardIdentifier:       " + vehicleLicense);
-      log.debug("  -> cardReaderIdentifier: " + swipeName);
-
-      if (timestamp == null || vehicleLicense == null || swipeName == null) {
-        res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.MISSING_PARAMETER}})
+  if (timestamp == null || vehicleLicense == null || swipeName == null) {
+    res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.MISSING_PARAMETER}})
+  }
+  else if (!moment(timestamp,'YYYY-MM-DDTHH:mm:ss.SSSZ', true).isValid()) {
+    res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.DATE_INCORRECT}})
+  }
+  else
+  {
+    // Conectar a la cola 
+    amqp.connect('amqp://' + properties.get('swipe.queue.server'), function(err, conn) {
+      if (conn == undefined){
+        log.error ("Error de conexion a la cola");
       }
-      else if (!moment(timestamp,'YYYY-MM-DDTHH:mm:ss.SSSZ', true).isValid()) {
-        res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.DATE_INCORRECT}})
-      }
-      else
-      {
-
-        // Conectar a la cola 
-        amqp.connect('amqp://' + properties.get('swipe.queue.server'), function(err, conn) {
-        if (conn == undefined){
-          console.log ("Error de conexion a la cola");
-        }
-
-        else {
-          log.debug("Conexion a la cola: OK");
-
-          conn.createChannel(function(err, ch) {
+      else {
+        log.debug("Conexion a la cola: OK");
+        conn.createChannel(function(err, ch) {
           q = properties.get('swipe.queue.name');
-
           log.debug("Conexion al canal: OK");
 
-
           // Limpiar la fecha
-      var fecha = moment(timestamp,'YYYY-MM-DDTHH:mm:ss.SSSZ');
-      var fecha_nomo = fecha.format("YYYYMMDDHHmmss");
-      
+          var fecha = moment(timestamp,'YYYY-MM-DDTHH:mm:ss.SSSZ');
+          var fecha_nomo = fecha.format("YYYYMMDDHHmmss");
 
-      // Leer el imei
-      KyrosModel.getVehicle(vehicleLicense,function(error, data)
-      {
-        if (data == null)
-        {
-          log.debug ("Error el leer el imei");
-          res.status(202).json({"response": {"status":status.STATUS_FAILURE,"description":messages.DB_ERROR}})
-        }
-        else if (data[0] == null)
-        {
-          log.debug ("El imei no existe");
-          res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.PARAMETER_ERROR}})
-        }
-        else {
-          if (typeof data !== 'undefined' && data.length > 0)
+          // Leer el imei
+          KyrosModel.getVehicle(vehicleLicense,function(error, data)
           {
-            var imei = data[0].imei;
-
-            // Leer las coordenadas del swipe
-            SwipeReaderModel.getSwipeByName(swipeName,function(error, data)
+            if (data == null)
             {
-              if (data == null)
+              log.debug ("Error el leer el imei");
+              res.status(202).json({"response": {"status":status.STATUS_FAILURE,"description":messages.DB_ERROR}})
+            }
+            else if (data[0] == null)
+            {
+              log.debug ("El imei no existe");
+              res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.PARAMETER_ERROR}})
+            }
+            else 
+            {
+              if (typeof data !== 'undefined' && data.length > 0)
               {
-                log.debug ("Error el leer las coordenadas del swipe");
-                res.status(202).json({"response": {"status":status.STATUS_FAILURE,"description":messages.DB_ERROR}})
-              }
-              else if (data[0] == null)
-              {
-                log.debug ("El swipe indicado no existe");
-                res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.PARAMETER_ERROR}})
-              }
-              else
-              {
-                //trama wonde. 
-                var trama = imei + "," + fecha_nomo + "," + data[0].longitude + "," + data[0].latitude + ",0," + "0" + ",0,9,2,0.0,0.9,3836";
+                var imei = data[0].imei;
 
-                log.debug ('Trama Swipe que se envia a la cola: %s', trama);
+                // Leer las coordenadas del swipe
+                SwipeReaderModel.getSwipeByName(swipeName,function(error, data)
+                {
+                  if (data == null)
+                  {
+                    log.debug ("Error el leer las coordenadas del swipe");
+                    res.status(202).json({"response": {"status":status.STATUS_FAILURE,"description":messages.DB_ERROR}})
+                  }
+                  else if (data[0] == null)
+                  {
+                    log.debug ("El swipe indicado no existe");
+                    res.status(202).json({"response": {"status":status.STATUS_VALIDATION_ERROR,"description":messages.PARAMETER_ERROR}})
+                  }
+                  else
+                  {
+                    //trama wonde. 
+                    var trama = imei + "," + fecha_nomo + "," + data[0].longitude + "," + data[0].latitude + ",0," + "0" + ",0,9,2,0.0,0.9,3836";
 
-                // Enviar a la cola
-                try {
-                    ch.sendToQueue(q, new Buffer(trama), {persistent: true});
-                    log.debug(" [x] Sent trama to rabbitMQ");
-                    ais_queue.info(trama);
-                } catch (err) {
-                    log.error("ERROR AL METER EN LA COLA: "+err);
-                    if (conn != undefined) {
-                      conn.close();
+                    log.debug ('Trama Swipe que se envia a la cola: %s', trama);
+
+                    // Enviar a la cola
+                    try {
+                      ch.sendToQueue(q, new Buffer(trama), {persistent: true});
+                      log.debug(" [x] Sent trama to rabbitMQ");
+                      ais_queue.info(trama);
+                    } catch (err) {
+                      log.error("ERROR AL METER EN LA COLA: "+err);
+                      if (conn != undefined) {
+                        conn.close();
+                      }
                     }
-                }
 
-                // Hacer llamadas a los que estes subscritos al evento
-                var eventManager = new EventManager();
-                var eventData;
-                if (data[0].situation == 0) {
-                  eventData = {
+                  // Hacer llamadas a los que estes subscritos al evento
+                  /*
+                  var eventManager = new EventManager();
+                  var eventData;
+                  if (data[0].situation == 0) {
+                    eventData = {
                       eventType : properties.get('sumo.event.personnel.infrastructure.enter'),
                       resourceId: vehicleLicense,
                       infraestructureId: swipeName,
                       latitude: data[0].latitude,
                       longitude: data[0].longitude
-                  };
-                }
-                else {
-                  eventData = {
+                    };
+                  }
+                  else {
+                    eventData = {
                       eventType : properties.get('sumo.event.personnel.infrastructure.left'),
                       resourceId: vehicleLicense,
                       infraestructureId: swipeName,
                       latitude: data[0].latitude,
                       longitude: data[0].longitude
-                  };
+                    };
+                  }
+                  // Enviar evento
+                  eventManager.registerPendingEvent(eventData);
+                  */
+
+                  // Respuesta
+                  res.status(201).json({"response": {"status":status.STATUS_SUCCESS,"description":"PersonnelSwipe created"}})
                 }
-                // Enviar evento
-                eventManager.registerPendingEvent(eventData);
-
-
-                
-                // Respuesta
-                res.status(201).json({"response": {"status":status.STATUS_SUCCESS,"description":"PersonnelSwipe created"}})
-              }
-            });
+              });  //SwipeReaderModel
+            }
+            else
+            {
+              log.debug ("Error el leer el imei");
+              res.status(202).json({"response": {"status":status.STATUS_FAILURE,"description":messages.DB_ERROR}})
+            }
           }
-          else
-          {
-            log.debug ("Error el leer el imei");
-            res.status(202).json({"response": {"status":status.STATUS_FAILURE,"description":messages.DB_ERROR}})
-          }
-        }
-      });
+        }); //KyrosModel
 
-
-          }, function(err) {
-            console.error('Connect failed: %s', err);
-          });
-          setTimeout(function() { conn.close(); }, 500);
+    }, function(err) {   //createChannel
+      console.error('Connect failed: %s', err);
+    });
+    setTimeout(function() { conn.close(); }, 500);
 
     }
 
-  });
+    });
+
+  }
+});
 
 
 
