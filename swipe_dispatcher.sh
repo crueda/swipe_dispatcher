@@ -55,34 +55,34 @@ PID = "/var/run/swipe_dispatcher"
 
 # Se definen los logs internos que usaremos para comprobar errores
 try:
-    logger = logging.getLogger('swipe_dispatcher')
-    loggerHandler = logging.handlers.TimedRotatingFileHandler(LOG, 'midnight', 1, backupCount=10)
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-    loggerHandler.setFormatter(formatter)
-    logger.addHandler(loggerHandler)
-    logger.setLevel(logging.DEBUG)
+	logger = logging.getLogger('swipe_dispatcher')
+	loggerHandler = logging.handlers.TimedRotatingFileHandler(LOG, 'midnight', 1, backupCount=10)
+	formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+	loggerHandler.setFormatter(formatter)
+	logger.addHandler(loggerHandler)
+	logger.setLevel(logging.DEBUG)
 except:
-    print '------------------------------------------------------------------'
-    print '[ERROR] Error writing log at %s' % LOG
-    print '[ERROR] Please verify path folder exits and write permissions'
-    print '------------------------------------------------------------------'
-    exit()
+	print '------------------------------------------------------------------'
+	print '[ERROR] Error writing log at %s' % LOG
+	print '[ERROR] Please verify path folder exits and write permissions'
+	print '------------------------------------------------------------------'
+	exit()
 
 ########################################################################
 
 if os.access(os.path.expanduser(PID), os.F_OK):
-        print "Checking if swipe_dispatcher process is already running..."
-        pidfile = open(os.path.expanduser(PID), "r")
-        pidfile.seek(0)
-        old_pd = pidfile.readline()
-        # process PID
-        if os.path.exists("/proc/%s" % old_pd) and old_pd!="":
-            print "You already have an instance of the swipe_dispatcher process running"
-            print "It is running as process %s" % old_pd
-            sys.exit(1)
-        else:
-            print "Trying to start swipe_dispatcher process..."
-            os.remove(os.path.expanduser(PID))
+	print "Checking if swipe_dispatcher process is already running..."
+	pidfile = open(os.path.expanduser(PID), "r")
+	pidfile.seek(0)
+	old_pd = pidfile.readline()	
+	# process PID
+	if os.path.exists("/proc/%s" % old_pd) and old_pd!="":
+		print "You already have an instance of the swipe_dispatcher process running"
+		print "It is running as process %s" % old_pd
+		sys.exit(1)
+	else:
+		print "Trying to start swipe_dispatcher process..."
+		os.remove(os.path.expanduser(PID))
 
 #This is part of code where we put a PID file in the lock file
 pidfile = open(os.path.expanduser(PID), 'a')
@@ -126,14 +126,14 @@ def addSwipe(vehicleLicense):
 		cursor = dbConnection.cursor()
 		cursor.execute(QUERY)
 		dbConnection.commit()
-		logger.info('Boat %s added at database', vehicleLicense)
+		logger.info('Swipe %s added at database', vehicleLicense)
 		cursor.close
 		cursor = dbConnection.cursor()
 		cursor.execute("""SELECT LAST_INSERT_ID()""")
 		result = cursor.fetchall()
 		cursor.close
 		dbConnection.close()
-		logger.info('Boat added with DEVICE_ID: %s', result[0][0])
+		logger.info('Swipe added with DEVICE_ID: %s', result[0][0])
         	return result[0][0]
 	except Exception, error:
 		logger.error('Error executing query : %s', error)
@@ -160,10 +160,7 @@ def addComplementary(vehicleLicense, deviceID):
 		dbConnection.close()
 	except Exception, error:
 		logger.error('Error executing query: %s', error)
-		
-		
-	
-
+				
 def getvehicleLicense(body):
 	try:
 		vehicleLicense = body.split(',')[0]
@@ -180,6 +177,7 @@ def callback(ch, method, properties, body):
     
     if (checkBoat(vehicleLicense) == '0'):
 		logger.info('Swipe is not at database.')
+		ch.basic_ack(delivery_tag = method.delivery_tag)
 		# creamos el dispositivo
 		#deviceID = addSwipe(vehicleLicense)
 		#logger.info('Swipe saved at database with DEVICE_ID %s', deviceID)
@@ -205,24 +203,23 @@ def callback(ch, method, properties, body):
 				pass
 
 		while connectedKCS==False:
-		try:
-			logger.info('Trying reconnection to KCS...')
-			socketKCS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			socketKCS.connect((KCS_HOST, int(KCS_PORT)))
-			socketKCS.send(body + '\r\n')
-			logger.info ("Sent to KCS: %s " % body)
-			ch.basic_ack(delivery_tag = method.delivery_tag)
-			connectedKCS = True
-			socketKCS.close()
-		except Exception, error:
-			logger.info('Reconnection to KCS failed....waiting %d seconds to retry.' , connectionRetry)
 			try:
+				logger.info('Trying reconnection to KCS...')
+				socketKCS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				socketKCS.connect((KCS_HOST, int(KCS_PORT)))
+				socketKCS.send(body + '\r\n')
+				logger.info ("Sent to KCS: %s " % body)
+				ch.basic_ack(delivery_tag = method.delivery_tag)
+				connectedKCS = True
 				socketKCS.close()
-			except:
-				pass
-			time.sleep(connectionRetry)
-	#time.sleep(DEFAULT_SLEEP_TIME)
-
+			except Exception, error:
+				logger.info('Reconnection to KCS failed....waiting %d seconds to retry.' , connectionRetry)
+				try:
+					socketKCS.close()
+				except:
+					pass
+				time.sleep(connectionRetry)
+				#time.sleep(DEFAULT_SLEEP_TIME)
 	
 try:
 	rabbitMQconnection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
