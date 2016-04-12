@@ -170,12 +170,13 @@ def getvehicleLicense(body):
 
 
 def callback(ch, method, properties, body):
-    logger.info("Message read from QUEUE: %s" % body)
-    #antes de enviar al KCS comprobamos si existe el barco en BD
-    vehicleLicense = getvehicleLicense(body)
-    logger.info('Checking if swipe %s is at database...', vehicleLicense)
+	sendMessage = False
+	logger.info("Message read from QUEUE: %s" % body)
+	#antes de enviar al KCS comprobamos si existe el barco en BD
+	vehicleLicense = getvehicleLicense(body)
+	logger.info('Checking if swipe %s is at database...', vehicleLicense)
     
-    if (checkBoat(vehicleLicense) == '0'):
+	if (checkSwipe(vehicleLicense) == '0'):
 		logger.info('Swipe is not at database.')
 		ch.basic_ack(delivery_tag = method.delivery_tag)
 		# creamos el dispositivo
@@ -185,32 +186,32 @@ def callback(ch, method, properties, body):
 		#time.sleep(0.1)
 	else:
 		logger.info('Swipe %s found at database', vehicleLicense)
-		
+
 		try:
 			socketKCS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			socketKCS.connect((KCS_HOST, int(KCS_PORT)))
 			socketKCS.send(body + '\r\n')
 			logger.info ("Sent to KCS: %s " % body)
+			sendMessage = True
 			ch.basic_ack(delivery_tag = method.delivery_tag)
 			socketKCS.close()
 			time.sleep(DEFAULT_SLEEP_TIME)
 		except Exception, error:
 			logger.error('Error sending data: %s', error)
 			try:
-				connectedKCS = False
 				socketKCS.close()
 			except:
 				pass
 
-		while connectedKCS==False:
+		while sendMessage==False:
 			try:
 				logger.info('Trying reconnection to KCS...')
 				socketKCS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 				socketKCS.connect((KCS_HOST, int(KCS_PORT)))
 				socketKCS.send(body + '\r\n')
 				logger.info ("Sent to KCS: %s " % body)
+				sendMessage = True
 				ch.basic_ack(delivery_tag = method.delivery_tag)
-				connectedKCS = True
 				socketKCS.close()
 			except Exception, error:
 				logger.info('Reconnection to KCS failed....waiting %d seconds to retry.' , connectionRetry)
